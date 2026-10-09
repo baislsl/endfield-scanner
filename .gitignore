@@ -1,0 +1,18 @@
+# 虚拟环境与构建产物
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# 运行产物 / 敏感信息 —— 绝不入库
+token.json
+*.token
+login-qr.png
+captures/
+
+# 可选的微信二维码模型（体积较大且归属 OpenCV，需自行下载）
+models/wechat_qrcode/*.caffemodel
+models/wechat_qrcode/*.prototxt

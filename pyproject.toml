@@ -1,0 +1,49 @@
+[project]
+name = "endfield-scanner"
+version = "0.1.0"
+description = "《明日方舟：终末地》扫码登录抢码工具（自动完成扫码与确认）"
+readme = "README.md"
+keywords = ["arknights-endfield", "qrcode", "login", "automation"]
+requires-python = ">=3.11"
+license = "MIT"
+
+dependencies = [
+    "httpx[socks]>=0.27",
+    "mss>=9.0",            # 跨平台截屏（macOS: Quartz / Windows: GDI）
+    "numpy>=1.26",
+    "keyring>=25.0",       # token 安全存储
+    # 二维码解码主力。比 cv2.QRCodeDetector 更快且对小码/模糊码更稳，
+    # 而且是纯 wheel（无需系统库、无需模型文件）。
+    "zxing-cpp>=2.2",
+    # cv2 仅作可选兜底与自测图像处理。macOS/Linux 用 headless 版（无 GUI 依赖）；
+    # Windows 用 contrib 版，它带 cv2.wechat_qrcode 微信模型。
+    "opencv-python-headless>=4.9; sys_platform != 'win32'",
+    "opencv-contrib-python>=4.9; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+# 直播取流用（当前搁置未启用）。PyAV 自带 ffmpeg，用于解封装/解码。
+# 之所以做成可选：它不是核心功能的依赖，装上会多出上百 MB。
+stream = ["av>=12.0"]
+
+# 测试用：自造二维码做端到端回归，不消耗真实码
+dev = [
+    "pytest>=8.0",
+    "qrcode>=7.4",
+    "pillow>=10.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+endfield-scanner = "endfield_scanner.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/endfield_scanner"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

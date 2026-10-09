@@ -1,0 +1,60 @@
+MIT License
+
+Copyright (c) 2026 baislsl
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+额外声明（中文，具有与上述条款同等的约束意图）
+Additional Notices (Chinese)
+================================================================================
+
+1. 本项目主要由人工智能（AI）编写。
+
+   代码、文档、注释与提交信息的大部分内容由 AI 生成，并经人工审阅与测试。
+   AI 生成的内容可能存在错误、过时信息或不适用于你的具体环境之处。
+   请勿将其视为权威实现或安全审计过的软件。
+
+2. 本项目仅供学习与技术研究使用。
+
+   目的是研究二维码识别、屏幕捕获、以及客户端登录流程的技术实现。
+   请勿用于任何商业用途，请勿用于违反任何服务条款、法律法规的场景。
+
+3. 账号风险由使用者自行承担。
+
+   本工具会使用你的账号凭证（account_token）代替你完成「扫码 + 确认」操作，
+   效果等同于你把账号登录到了运行本工具的机器上。
+
+   * 运行本工具的机器（例如主播的电脑）上的任何人都可能操作你的账号；
+   * account_token 等同于账号，泄露即等于账号泄露；
+   * 使用自动化手段可能与游戏服务条款冲突，可能导致账号被限制或封禁。
+
+   **作者与贡献者不对任何账号损失、封禁、数据损坏或其他后果负责。
+   使用即表示你已知悉并接受上述风险，后果自负。**
+
+4. 无任何担保。
+
+   本项目按「现状」提供，不附带任何明示或暗示的担保，包括但不限于
+   适销性、特定用途适用性与不侵权的担保。
+
+5. 与权利方无关。
+
+   本项目与 Hypergryph / GRYPHLINE / 鹰角网络 / 森空岛 及其关联公司
+   无任何隶属、合作或授权关系。所有游戏名称、商标与相关内容
+   归其各自权利人所有。

@@ -644,3 +644,114 @@ class TestHugeFrameFastPath:
         b = QRDecoder(huge_frames_fast_path=False).decode(frame)
         assert a is not None and b is not None
         assert a.scan_id == b.scan_id
+
+
+# --------------------------------------------------------------------------- #
+# 打包脚本
+# --------------------------------------------------------------------------- #
+
+
+class TestPackagingBuildScript:
+    """打包脚本里可确定性验证的部分。
+
+    完整的打包过程需要 PyInstaller 且耗时约 30 秒，不适合放进单测；
+    这里只锁住「产物命名」和「必须排除的模块」这类容易改错的地方。
+    """
+
+    def _module(self):
+        import importlib.util
+        import sys
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent.parent / "packaging" / "build.py"
+        spec = importlib.util.spec_from_file_location("_pkg_build", path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_pkg_build"] = mod
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_artifact_name_contains_platform_and_arch(self) -> None:
+        name = self._module()._arch_tag()
+        assert name.startswith("endfield-scanner-")
+        parts = name.split("-")
+        # 例如 endfield-scanner-macos-arm64
+        assert parts[2] in ("macos", "windows", "linux"), name
+        assert parts[3] in ("arm64", "x64"), name
+
+    def test_av_is_excluded(self) -> None:
+        """`av` 必须排除：它自带一套 ffmpeg，会和 opencv 的 ffmpeg 撞 dylib。
+
+        这是实打实踩过的坑 —— 两者同时存在时会刷一堆 objc 警告，严重时崩溃。
+        """
+        assert "av" in self._module().EXCLUDES
+
+    def test_big_unused_modules_are_excluded(self) -> None:
+        excludes = set(self._module().EXCLUDES)
+        for heavy in ("tkinter", "matplotlib", "pandas", "scipy"):
+            assert heavy in excludes, f"{heavy} 应被排除以减小体积"
+
+    def test_entry_script_uses_absolute_import(self) -> None:
+        """入口脚本必须用绝对导入。
+
+        用 ``src/endfield_scanner/__main__.py`` 当入口会报
+        ``attempted relative import with no known parent package`` ——
+        那里面是 ``from .cli import main``，被当成独立脚本执行时没有父包。
+        """
+        from pathlib import Path
+
+        entry = Path(__file__).resolve().parent.parent / "packaging" / "entry.py"
+        # 只看代码行：docstring 里会把"错误的写法"当反例引用，
+        # 整文件搜索会误命中，那是测试写法的问题而不是代码的问题。
+        code_lines = [
+            line.strip()
+            for line in entry.read_text("utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        code = "\n".join(code_lines)
+        assert "from endfield_scanner.cli import main" in code
+        # 相对导入不能出现在真正的 import 语句里
+        import_lines = [ln for ln in code_lines if ln.startswith(("import ", "from "))]
+        assert not any(ln.startswith("from .") for ln in import_lines), import_lines
+
+    def test_entry_script_is_runnable_as_script(self) -> None:
+        """``python packaging/entry.py --version`` 必须能起来（不依赖父包）。"""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        entry = Path(__file__).resolve().parent.parent / "packaging" / "entry.py"
+        r = subprocess.run(
+            [sys.executable, str(entry), "--version"], capture_output=True, text=True, timeout=60
+        )
+        assert r.returncode == 0, r.stderr
+        assert "endfield-scanner" in r.stdout
+
+
+class TestBuildScriptZipsOnedir:
+    """目录形式必须额外产出 zip。
+
+    为什么需要：``--onedir`` 启动快（实测稳态 0.14s vs ``--onefile`` 的 5s），
+    但分发的是一个目录。zip 就是它的分发形态，所以打包时必须一并产出。
+    """
+
+    def _source(self) -> str:
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parent.parent / "packaging" / "build.py").read_text("utf-8")
+
+    def test_default_is_onedir_not_onefile(self) -> None:
+        src = self._source()
+        # 默认分支应当是 onedir：只有显式 --onefile 才走 onefile
+        assert '"--onefile" if args.onefile else "--onedir"' in src
+
+    def test_creates_zip_for_onedir(self) -> None:
+        src = self._source()
+        assert "make_archive" in src, "缺少打 zip 的步骤"
+        # 用标准库而不调 zip/Compress-Archive：跨平台行为一致
+        assert "shutil.make_archive" in src
+
+    def test_zip_skipped_for_onefile(self) -> None:
+        """单文件模式本身就是单文件，不需要再套 zip。"""
+        src = self._source()
+        assert "not args.onefile and not args.no_zip" in src

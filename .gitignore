@@ -7,6 +7,10 @@ build/
 dist/
 .pytest_cache/
 
+# PyInstaller 缓存与自动生成的 spec（打包脚本固定在项目内，避免依赖外部可写目录）
+.pyinstaller/
+*.spec
+
 # 运行产物 / 敏感信息 —— 绝不入库
 token.json
 *.token
@@ -16,3 +20,6 @@ captures/
 # 可选的微信二维码模型（体积较大且归属 OpenCV，需自行下载）
 models/wechat_qrcode/*.caffemodel
 models/wechat_qrcode/*.prototxt
+
+# 本地构建/分发脚本（个人环境专用，不对外）
+scripts/

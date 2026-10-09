@@ -11,10 +11,11 @@
 
 ## 安装
 
-需要 **Python 3.11 或更高**。装好 Python 后，**在项目目录里**（下面所有命令也都在
-这个目录里执行）创建虚拟环境：
+需要 **Python 3.11 或更高**。
 
 ```bash
+git clone https://github.com/baislsl/endfield-scanner.git
+cd endfield-scanner
 python -m venv .venv
 ```
 
@@ -220,10 +221,12 @@ endfield-scanner/
 | 依赖 | 用途 |
 |---|---|
 | zxing-cpp | 二维码识别（比 OpenCV 自带检测器更快、对小码更稳） |
-| opencv-python | 图像处理、生成测试二维码 |
+| opencv-python | 图像处理 |
 | mss | 屏幕截图 |
 | httpx | 网络请求 |
 | keyring | token 安全存储 |
+| qrcode | **生成**登录二维码（`login` 命令必需） |
+| pillow | qrcode 生成 PNG 时的后端 |
 
 ---
 

@@ -19,6 +19,10 @@ dependencies = [
     # Windows 用 contrib 版，它带 cv2.wechat_qrcode 微信模型。
     "opencv-python-headless>=4.9; sys_platform != 'win32'",
     "opencv-contrib-python>=4.9; sys_platform == 'win32'",
+    # 生成扫码登录用的二维码。注意这是**运行时必需**：`login` 命令要出码，
+    # 缺了它登录流程直接跑不起来。
+    "qrcode>=7.4",
+    "pillow>=10.0",        # qrcode 生成 PNG 时的后端
 ]
 
 [project.optional-dependencies]
@@ -29,8 +33,6 @@ stream = ["av>=12.0"]
 # 测试用：自造二维码做端到端回归，不消耗真实码
 dev = [
     "pytest>=8.0",
-    "qrcode>=7.4",
-    "pillow>=10.0",
     "pytest-asyncio>=0.23",
 ]
 

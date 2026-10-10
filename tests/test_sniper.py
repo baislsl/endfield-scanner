@@ -43,11 +43,19 @@ class FakeHypergryph:
         confirmed_after_s: float | None = None,
         initially_expired: bool = False,
         scan_code_at_pending: bool = False,
+        scanned_after_polls: int | None = None,
     ) -> None:
         self.scanned_after_s = scanned_after_s
         #: 扫码后多久才"确认授权"。设成非 None 就会先经过 101「已扫码待确认」中间态。
         self.confirmed_after_s = confirmed_after_s
         self.initially_expired = initially_expired
+        #: 前多少次 scan_status 返回「未扫码」。
+        #:
+        #: 与 ``scanned_after_s`` 的区别：那个依赖**墙钟**，而墙钟从 ``start()``
+        #: 就开始走 —— 机器一空闲（CI 上很常见）客户端还没开始轮询，时间就过去了，
+        #: 于是"轮询了 N 次"的断言随机器快慢漂移。要断言轮询次数就该用次数驱动。
+        self.scanned_after_polls = scanned_after_polls
+        self._polls_seen = 0
         #: True = 101「已扫码待确认」阶段就返回 scanCode（实测真实服务端就是这样）。
         #: 这正是"抢先提交"能赢的前提：scanCode 在用户点确认之前就已可用。
         self.scan_code_at_pending = scan_code_at_pending
@@ -106,6 +114,20 @@ class FakeHypergryph:
                     if outer.scanned:
                         self._send(200, {"status": 101, "msg": "已扫码待确认", "type": "A"})
                         return
+                    with outer._lock:
+                        outer._polls_seen += 1
+                        polls_seen = outer._polls_seen
+                        # 轮询次数到了就把状态**真的**推进为「已扫」。
+                        #
+                        # 为什么不能只影响这一次的返回值：`scanned` 是个状态位，
+                        # 后续分支都看它。只改返回值的话，下一次轮询又走回旧状态，
+                        # 永远推不动（这个坑我踩过）。
+                        if (
+                            outer.scanned_after_polls is not None
+                            and polls_seen > outer.scanned_after_polls
+                        ):
+                            outer.scanned = True
+
                     elapsed = time.monotonic() - outer.started_at
                     if elapsed < outer.scanned_after_s:
                         # 100 未扫码
@@ -322,20 +344,33 @@ class TestSniperWins:
         assert reporter.successes, "应当报告成功"
 
     async def test_polls_repeatedly_while_unscanned(self, fake_api) -> None:
-        server = fake_api(scanned_after_s=0.4)
+        """未扫码期间必须在反复轮询，而不是碰一次运气就放弃。
+
+        用 ``scanned_after_polls`` 而不是墙钟来驱动：墙钟从服务端 ``start()``
+        就开始走，机器一空闲（CI 上很常见）客户端还没开始轮询时间就过去了，
+        这个断言会随机器快慢漂移 —— 曾经就因此在 CI 上偶发失败。
+        """
+        # 注意三个参数的配合：
+        #   scanned_after_s 必须给正值 —— 构造时 `scanned = scanned_after_s <= 0`，
+        #     给 0 会让它一开始就是「已扫」，直接走 101 分支，第一次轮询就结束。
+        #   然后由 scanned_after_polls 在前 5 次返回 100，第 6 次推进为已扫。
+        #   scan_code_at_pending=True 贴近真实服务端：101 阶段就给出 scanCode。
+        server = fake_api(
+            scanned_after_s=60.0, scanned_after_polls=5, scan_code_at_pending=True
+        )
         sniper = Sniper(
             account_token="unused",
             decoder=QRDecoder(),
             reporter=_SilentReporter(),
-            poll_interval_ms=30,
+            poll_interval_ms=10,
             auto_scan=False,
             confirm_delay_ms=0,
             confirm_delay_max_ms=0,
         )
         result = await asyncio.wait_for(sniper.run(_qr_frames(), timeout_s=15), timeout=30)
         assert result.ok
-        # 0.4s / 30ms ≈ 13 次，放宽下限以确保确实在轮询而不是碰运气
-        assert server.status_polls >= 5
+        # 前 5 次是 100，第 6 次起才是 101 —— 所以至少轮询了 6 次
+        assert server.status_polls >= 6, f"只轮询了 {server.status_polls} 次"
 
     async def test_does_not_reprocess_same_scan_id(self, fake_api) -> None:
         server = fake_api(scanned_after_s=0.2)

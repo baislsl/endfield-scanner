@@ -43,6 +43,15 @@ Windows 的 32 位用户占比极低，且 32 位进程有 4GB 地址空间限�
     python packaging/build.py --no-zip     # 只出目录，不打包
 
 产物落在 ``dist/``。
+
+⚠️ 本脚本**打印到终端的内容必须全部是 ASCII**
+---------------------------------------------
+docstring 和注释用中文没问题（它们不会被编码），但 ``print`` / argparse 文案不行。
+
+原因：Windows CI 上 Python 的 stdout 编码是 ``cp1252``，打印中文会直接抛
+``UnicodeEncodeError: 'charmap' codec can't encode characters`` 并让构建失败。
+CI 里没有人设 ``PYTHONIOENCODING``，所以不能指望运行环境的 locale。
+本脚本会打印中文曾导致过 CI 打包失败 —— 改回去之前请先想清楚这一点。
 """
 
 from __future__ import annotations
@@ -50,6 +59,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -80,8 +90,49 @@ EXCLUDES = [
 ]
 
 
-def _arch_tag() -> str:
-    """给产物起个带架构的名字，方便同时分发多架构。"""
+#: 版本号的唯一来源。
+#:
+#: ``pyproject.toml`` 里配的是 ``dynamic = ["version"]`` + ``[tool.hatch.version]``，
+#: 同样读这个文件 —— 全项目只有这一处写版本号。
+#: 这样 CLI 显示的版本、包的版本、产物名里的版本永远一致。
+VERSION_FILE = ROOT / "src" / "endfield_scanner" / "__init__.py"
+
+
+def _project_version() -> str:
+    """读版本号（唯一来源：``src/endfield_scanner/__init__.py``）。
+
+    手写正则而不用 ``tomllib``/import：前者是 TOML 专用，后者会把整个包
+    import 进来（打包脚本不该依赖被构建的代码能正常运行）。正则足够且无副作用。
+    读不到就返回 "0.0.0"，让构建照常进行而不是报错中断。
+    """
+    try:
+        text = VERSION_FILE.read_text("utf-8")
+    except OSError:
+        return "0.0.0"
+    m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
+    return m.group(1) if m else "0.0.0"
+
+
+def _normalize_version(raw: str | None) -> str:
+    """统一版本号写法：总是带一个 ``v`` 前缀。
+
+    这样 ``--version 0.1.0``、``--version v0.1.0`` 和从 pyproject 读到的
+    ``0.1.0`` 会得到同样的产物名，避免同一个版本出现两种文件名。
+    """
+    v = (raw or _project_version()).strip()
+    # 用 lstrip 而不是去掉一个字符：这样 `vv0.1.0` 也能归一到 `v0.1.0`，
+    # 函数对"已经带 v"和"带了多个 v"的输入都幂等。
+    v = v.lstrip("v")
+    return f"v{v}" if v else ""
+
+
+def _arch_tag(version: str | None = None) -> str:
+    """给产物起个带版本与架构的名字，方便同时分发多架构、多版本。
+
+    形如 ``endfield-scanner-v0.1.0-macos-arm64``。
+    带上版本号是为了让用户下载后能区分不同版本 —— 否则多个版本的 zip
+    下载下来文件名一模一样。
+    """
     machine = platform.machine().lower()
     if sys.platform == "darwin":
         os_name = "macos"
@@ -92,26 +143,35 @@ def _arch_tag() -> str:
     else:
         os_name = "linux"
         arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
-    return f"{NAME}-{os_name}-{arch}"
+    ver = _normalize_version(version)
+    return f"{NAME}-{ver}-{os_name}-{arch}"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="打包成独立可执行文件")
+    parser = argparse.ArgumentParser(description="Build a standalone executable for the current platform")
     parser.add_argument("--onefile", action="store_true",
-                        help="产出单文件（启动约 5 秒，仅在必须单文件分发时用）")
+                        help="single-file output (about 5s startup; use only when a single file is required)")
     parser.add_argument("--no-zip", action="store_true",
-                        help="不额外打 zip（默认会为目录形式打一个同名 zip）")
-    parser.add_argument("--clean", action="store_true", help="先清理 build/dist")
-    parser.add_argument("--name", default=None, help="产物文件名（默认按平台架构自动命名）")
+                        help="skip the extra zip (by default onedir output is also zipped)")
+    parser.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
+    parser.add_argument("--name", default=None,
+                        help="artifact name (defaults to endfield-scanner-<version>-<os>-<arch>)")
+    parser.add_argument("--version", default=None,
+                        help="version to embed in the artifact name; "
+                             "defaults to the version in pyproject.toml. "
+                             "A leading 'v' is optional and always normalized in.")
     args = parser.parse_args()
 
     if not ENTRY.exists():
-        print(f"找不到入口脚本：{ENTRY}", file=sys.stderr)
+        print(f"entry script not found: {ENTRY}", file=sys.stderr)
         return 1
 
     if args.clean:
         for d in ("build", "dist"):
             shutil.rmtree(ROOT / d, ignore_errors=True)
+
+    # 只算一次：产物名在命令行、打印、打 zip 三处都要用，分散计算容易不一致
+    name = args.name or _arch_tag(args.version)
 
     # PyInstaller 默认把缓存写到 ~/Library/Application Support 或 %APPDATA%。
     # 在受限环境（沙箱、CI 的干净账户）里那可能不可写，所以固定到项目内。
@@ -121,24 +181,25 @@ def main() -> int:
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
         "--onefile" if args.onefile else "--onedir",
-        "--name", args.name or _arch_tag(),
+        "--name", name,
         *[f"--exclude-module={m}" for m in EXCLUDES],
         str(ENTRY),
     ]
 
-    print(f"平台：{sys.platform} / {platform.machine()}")
-    print(f"解释器：{sys.executable}")
-    print(f"产物名：{args.name or _arch_tag()}")
-    print("执行：", " ".join(cmd))
+    print(f"platform : {sys.platform} / {platform.machine()}")
+    print(f"python   : {sys.executable}")
+    src_label = "--version" if args.version else VERSION_FILE.name
+    print(f"version  : {_normalize_version(args.version)}  (from {src_label})")
+    print(f"artifact : {name}")
+    print("command  :", " ".join(cmd))
     print()
 
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:
-        print("\n打包失败。", file=sys.stderr)
+        print("\nbuild failed.", file=sys.stderr)
         return result.returncode
 
     dist = ROOT / "dist"
-    name = args.name or _arch_tag()
 
     # 目录形式额外打一个 zip：分发时给用户那个 zip，解压即用。
     # 用 shutil.make_archive 而不是 zip/Compress-Archive：三大平台行为一致，
@@ -146,11 +207,11 @@ def main() -> int:
     if not args.onefile and not args.no_zip:
         target = dist / name
         if target.is_dir():
-            print(f"\n正在打 zip（{name}.zip）…")
+            print(f"\nzipping {name}.zip ...")
             archive = shutil.make_archive(str(dist / name), "zip", root_dir=dist, base_dir=name)
-            print(f"  完成：{archive}")
+            print(f"  created: {archive}")
 
-    print(f"\n产物在 {dist}/：")
+    print(f"\nartifacts in {dist}/")
     for item in sorted(dist.iterdir()):
         if item.name == "build":
             continue
@@ -158,7 +219,7 @@ def main() -> int:
             print(f"  {item.name}  {item.stat().st_size / 1024 / 1024:.1f} MB")
         else:
             total = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
-            print(f"  {item.name}/  {total / 1024 / 1024:.1f} MB（目录）")
+            print(f"  {item.name}/  {total / 1024 / 1024:.1f} MB (dir)")
     return 0
 
 

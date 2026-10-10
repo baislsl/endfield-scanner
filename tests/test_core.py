@@ -671,13 +671,66 @@ class TestPackagingBuildScript:
         spec.loader.exec_module(mod)
         return mod
 
-    def test_artifact_name_contains_platform_and_arch(self) -> None:
+    def test_artifact_name_contains_version_platform_and_arch(self) -> None:
         name = self._module()._arch_tag()
-        assert name.startswith("endfield-scanner-")
+        assert name.startswith("endfield-scanner-v")
         parts = name.split("-")
-        # 例如 endfield-scanner-macos-arm64
-        assert parts[2] in ("macos", "windows", "linux"), name
-        assert parts[3] in ("arm64", "x64"), name
+        # 例如 endfield-scanner-v0.1.0-macos-arm64
+        assert parts[2].startswith("v"), name
+        assert parts[3] in ("macos", "windows", "linux"), name
+        assert parts[4] in ("arm64", "x64"), name
+
+    def test_version_is_normalized_to_single_v(self) -> None:
+        """`0.1.0` / `v0.1.0` / `v v0.1.0` 都要归一成同一种写法。
+
+        否则同一个版本会因为传参写法不同而产出两种文件名 —— CI 传的是 tag 名
+        （带 v），本地默认读 pyproject（不带 v），两边必须一致。
+        """
+        mod = self._module()
+        for raw in ("0.1.0", "v0.1.0", "  0.1.0  ", "vv0.1.0"):
+            assert mod._normalize_version(raw) == "v0.1.0", raw
+        assert mod._normalize_version("2.3.4") == "v2.3.4"
+
+    def test_version_has_a_single_source(self) -> None:
+        """版本号只能有一处来源：``src/endfield_scanner/__init__.py``。
+
+        曾经 ``pyproject.toml`` 里也硬写了一份，改一处忘另一处就会出现
+        "CLI 显示 0.1.0、产物名却是 v0.2.0"。现在 pyproject 用
+        ``dynamic = ["version"]`` + ``[tool.hatch.version]`` 指回该文件。
+        """
+        from pathlib import Path
+
+        mod = self._module()
+        root = Path(__file__).resolve().parent.parent
+
+        # build.py 读到的版本 = 运行时 __version__
+        sys_path_added = False
+        import sys
+
+        if str(root / "src") not in sys.path:
+            sys.path.insert(0, str(root / "src"))
+            sys_path_added = True
+        try:
+            from endfield_scanner import __version__ as runtime_version
+
+            assert mod._project_version() == runtime_version
+        finally:
+            if sys_path_added:
+                sys.path.remove(str(root / "src"))
+
+        assert mod._normalize_version(None) == f"v{runtime_version}"
+
+    def test_pyproject_declares_dynamic_version(self) -> None:
+        """pyproject 里不能再出现静态 version，否则又变成两份。"""
+        from pathlib import Path
+
+        pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text("utf-8")
+        assert 'dynamic = ["version"]' in pyproject
+        assert "[tool.hatch.version]" in pyproject
+        # 顶格的 `version = ` 说明又写死了
+        import re
+
+        assert not re.search(r"^version\s*=", pyproject, re.MULTILINE), "pyproject 里又出现静态 version"
 
     def test_av_is_excluded(self) -> None:
         """`av` 必须排除：它自带一套 ffmpeg，会和 opencv 的 ffmpeg 撞 dylib。

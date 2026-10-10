@@ -9,7 +9,51 @@
 
 ---
 
-## 安装
+## 使用
+
+推荐直接用 [Releases](https://github.com/baislsl/endfield-scanner/releases) 里下载的可执行文件
+（macOS Apple Silicon / Windows 64 位），不需要装 Python。
+**Intel Mac 没有预编译版**，请按下一节从源码运行。
+
+### 1. 登录一次，拿到 token
+
+```bash
+endfield-scanner login
+```
+
+用手机「森空岛」App 扫终端里的二维码（App：个人中心右上角 → 扫一扫），
+手机上点确认。成功后会打印 `✔ token 可用`。**只需做一次。**
+
+已经有 token 了？用 `endfield-scanner login --paste` 直接粘贴。
+
+### 2. 抢码
+
+```bash
+endfield-scanner sniff
+```
+
+把游戏登录页面切到屏幕上，看到这些就说明成了：
+
+```
+[   3.25s] HIT     发现扫码登录码 scanId=3f7a1c9e...
+[   3.49s] HIT     scanId 3f7a1c9e… 已代为扫码（账号 139****0000）
+[   6.13s] HIT     scanId 3f7a1c9e… 已代为确认登录
+[   6.22s] SUCCESS 登录成功，客户端应该已经登上你的账号了。
+```
+
+默认全屏扫描，不需要指定区域。
+
+| 参数 | 作用 |
+|---|---|
+| `-v` | 打印所有请求、逐帧耗时、状态变化。排障必用 |
+| `--save-capture` | 识别到码时把那一帧存到 `./captures/` |
+| `--timeout 60` | 盯 60 秒后退出（默认不限，Ctrl+C 退出） |
+| `--keep-going` | 抢到一个后继续盯下一个 |
+| `--region 左,上,宽,高` | 只扫屏幕的一块区域 |
+
+---
+
+## 安装（从源码运行）
 
 需要 **Python 3.11 或更高**。
 
@@ -74,46 +118,6 @@ endfield-scanner doctor
 ```
 
 每一项都是 ✔ 才算就绪。它还会用一张自造的二维码测试解码器。
-
----
-
-## 使用
-
-### 1. 登录一次，拿到 token
-
-```bash
-endfield-scanner login
-```
-
-用手机「森空岛」App 扫终端里的二维码（App：个人中心右上角 → 扫一扫），
-手机上点确认。成功后会打印 `✔ token 可用`。**只需做一次。**
-
-已经有 token 了？用 `endfield-scanner login --paste` 直接粘贴。
-
-### 2. 抢码
-
-```bash
-endfield-scanner sniff
-```
-
-把游戏登录页面切到屏幕上，看到这些就说明成了：
-
-```
-[   3.25s] HIT     发现扫码登录码 scanId=3f7a1c9e...
-[   3.49s] HIT     scanId 3f7a1c9e… 已代为扫码（账号 139****0000）
-[   6.13s] HIT     scanId 3f7a1c9e… 已代为确认登录
-[   6.22s] SUCCESS 登录成功，客户端应该已经登上你的账号了。
-```
-
-默认全屏扫描，不需要指定区域。
-
-| 参数 | 作用 |
-|---|---|
-| `-v` | 打印所有请求、逐帧耗时、状态变化。排障必用 |
-| `--save-capture` | 识别到码时把那一帧存到 `./captures/` |
-| `--timeout 60` | 盯 60 秒后退出（默认不限，Ctrl+C 退出） |
-| `--keep-going` | 抢到一个后继续盯下一个 |
-| `--region 左,上,宽,高` | 只扫屏幕的一块区域 |
 
 ---
 

@@ -2,8 +2,10 @@ name: build
 
 # 为什么用 CI 而不是本地脚本一次跑完所有平台：
 # **PyInstaller 不能交叉编译** —— 它把「当前运行的解释器 + 依赖」一起打进去，
-# 所以 Windows 产物只能在 Windows 上构建，Intel Mac 产物只能在 Intel 上构建。
-# CI 提供各平台的原生 runner，用一个矩阵并行跑，效果等价于"一条命令出全部"。
+# 所以 Windows 产物只能在 Windows 上构建。CI 提供各平台的原生 runner，
+# 用一个矩阵并行跑，效果等价于"一条命令出全部"。
+#
+# 当前覆盖：macOS arm64、Windows x64。Intel Mac 已不再支持（见矩阵内说明）。
 #
 # 本地想单独打包某个平台，用 packaging/build.py。
 
@@ -27,11 +29,11 @@ jobs:
       matrix:
         include:
           # ---- macOS ----
-          # macos-13 是 Intel runner，用来出 x86_64 产物。
-          # 这是本地 Apple Silicon 做不到的：必须 x86_64 解释器 + x86_64 wheel。
-          - os: macos-13
-            label: macOS x64 (Intel)
-          # macos-14/15 是 Apple Silicon，出 arm64 产物
+          # 只出 Apple Silicon（arm64）产物。
+          # 原因：Intel Mac 已停产多年，且 macos-13 runner 在 GitHub 上排期紧张、
+          # 容易排队；维护一个几乎无人使用的目标不划算。
+          # 需要 Intel 版的话，本地在 Intel Mac 上跑 packaging/build.py 即可
+          # （PyInstaller 不支持交叉编译，只能在对应架构上构建）。
           - os: macos-14
             label: macOS arm64 (Apple Silicon)
           # ---- Windows ----
@@ -59,13 +61,23 @@ jobs:
         run: python -m pytest -q
 
       - name: 打包
-        run: python packaging/build.py --clean
+        # 推 tag 触发时用 tag 名当版本（github.ref_name 形如 v0.1.0）；
+        # 手动触发时 ref_name 是分支名（如 main），不是版本号，
+        # 所以那种情况不传 --version，让 build.py 退回读 pyproject.toml。
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            python packaging/build.py --clean --version "${GITHUB_REF_NAME}"
+          else
+            python packaging/build.py --clean
+          fi
 
-      # 产物名已由 build.py 按平台架构生成（例如 endfield-scanner-macos-arm64）
+      # 产物名已由 build.py 按版本+平台+架构生成
+      # （例如 endfield-scanner-v0.1.0-macos-arm64.zip）
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-package
+          name: ${{ matrix.os }}-package-${{ github.ref_name }}
           path: dist/*
           # 保留 14 天足够验证；正式发布走下面的 Release
           retention-days: 14

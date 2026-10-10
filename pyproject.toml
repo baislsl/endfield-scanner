@@ -1,6 +1,8 @@
 [project]
 name = "endfield-scanner"
-version = "0.1.0"
+# 版本号只在 src/endfield_scanner/__init__.py 里写一次，这里动态读取。
+# 否则两处各写一份，改一处忘另一处就会出现"CLI 显示 0.1.0、产物名却是 v0.2.0"。
+dynamic = ["version"]
 description = "《明日方舟：终末地》扫码登录抢码工具（自动完成扫码与确认）"
 readme = "README.md"
 keywords = ["arknights-endfield", "qrcode", "login", "automation"]
@@ -42,6 +44,9 @@ endfield-scanner = "endfield_scanner.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/endfield_scanner/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/endfield_scanner"]

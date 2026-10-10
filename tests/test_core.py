@@ -671,14 +671,42 @@ class TestPackagingBuildScript:
         spec.loader.exec_module(mod)
         return mod
 
-    def test_artifact_name_contains_version_platform_and_arch(self) -> None:
-        name = self._module()._arch_tag()
+    def test_release_name_has_version_platform_and_arch(self) -> None:
+        """外层目录 / zip 的名字要带版本+平台，便于区分不同版本的下发。"""
+        name = self._module()._release_name()
         assert name.startswith("endfield-scanner-v")
         parts = name.split("-")
         # 例如 endfield-scanner-v0.1.0-macos-arm64
         assert parts[2].startswith("v"), name
         assert parts[3] in ("macos", "windows", "linux"), name
         assert parts[4] in ("arm64", "x64"), name
+
+    def test_inner_executable_keeps_a_plain_name(self) -> None:
+        """**可执行文件本体必须是朴素名**，不带版本与平台。
+
+        这样用户升级后，自己的脚本 / 快捷方式 / 文档里的路径都不用改。
+        曾经把两者混用一个名字，导致可执行文件也变成了
+        `endfield-scanner-v0.1.0-macos-arm64`。
+        """
+        from pathlib import Path
+
+        mod = self._module()
+        src = (
+            Path(__file__).resolve().parent.parent / "packaging" / "build.py"
+        ).read_text("utf-8")
+        # PyInstaller 那一步必须用朴素名
+        assert '"--name", exe_name' in src
+        assert "exe_name = args.name or NAME" in src
+        assert mod.NAME == "endfield-scanner"
+
+    def test_zip_is_named_like_the_release_directory(self) -> None:
+        """zip 名与目录名一致，解压后不会多一层奇怪的前缀。"""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parent.parent / "packaging" / "build.py"
+        ).read_text("utf-8")
+        assert "str(dist / release_name), \"zip\", root_dir=dist, base_dir=release_name" in src
 
     def test_version_is_normalized_to_single_v(self) -> None:
         """`0.1.0` / `v0.1.0` / `v v0.1.0` 都要归一成同一种写法。

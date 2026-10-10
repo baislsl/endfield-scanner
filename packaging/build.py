@@ -42,7 +42,18 @@ Windows 的 32 位用户占比极低，且 32 位进程有 4GB 地址空间限�
     python packaging/build.py --clean      # 先清掉 build/dist
     python packaging/build.py --no-zip     # 只出目录，不打包
 
-产物落在 ``dist/``。
+产物落在 ``dist/``。命名规则：
+
+===========================================  ==========================================
+文件名                                        说明
+===========================================  ==========================================
+``endfield-scanner-v0.1.0-macos-arm64/``      外层目录，带**版本 + 平台**
+``endfield-scanner-v0.1.0-macos-arm64.zip``   分发给用户的压缩包
+``.../endfield-scanner``                      里面的**可执行文件，朴素名**
+===========================================  ==========================================
+
+目录与 zip 带版本是为了让用户能区分不同版本的下发；**里面的可执行文件保持朴素名**，
+这样用户升级后自己的脚本、快捷方式、文档里的路径都不用改。
 
 ⚠️ 本脚本**打印到终端的内容必须全部是 ASCII**
 ---------------------------------------------
@@ -126,13 +137,8 @@ def _normalize_version(raw: str | None) -> str:
     return f"v{v}" if v else ""
 
 
-def _arch_tag(version: str | None = None) -> str:
-    """给产物起个带版本与架构的名字，方便同时分发多架构、多版本。
-
-    形如 ``endfield-scanner-v0.1.0-macos-arm64``。
-    带上版本号是为了让用户下载后能区分不同版本 —— 否则多个版本的 zip
-    下载下来文件名一模一样。
-    """
+def _platform_tag() -> str:
+    """当前平台与架构的后缀，例如 ``macos-arm64`` / ``windows-x64``。"""
     machine = platform.machine().lower()
     if sys.platform == "darwin":
         os_name = "macos"
@@ -143,8 +149,17 @@ def _arch_tag(version: str | None = None) -> str:
     else:
         os_name = "linux"
         arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
-    ver = _normalize_version(version)
-    return f"{NAME}-{ver}-{os_name}-{arch}"
+    return f"{os_name}-{arch}"
+
+
+def _release_name(version: str | None = None) -> str:
+    """分发物的名字：``endfield-scanner-v0.1.0-macos-arm64``。
+
+    只用于**外层的目录与 zip**，让用户下载下来能区分版本与平台。
+    **里面的可执行文件始终是朴素的 ``endfield-scanner``** —— 用户解压后拿到的
+    是一个名字稳定的程序，而不是每次升级都要改脚本里的路径。
+    """
+    return f"{NAME}-{_normalize_version(version)}-{_platform_tag()}"
 
 
 def main() -> int:
@@ -170,8 +185,12 @@ def main() -> int:
         for d in ("build", "dist"):
             shutil.rmtree(ROOT / d, ignore_errors=True)
 
-    # 只算一次：产物名在命令行、打印、打 zip 三处都要用，分散计算容易不一致
-    name = args.name or _arch_tag(args.version)
+    # 两个名字要分清（早期版本混用成一个，导致可执行文件名里也带上了版本与平台）：
+    #   exe_name     —— 可执行文件本体，保持朴素稳定，用户解压后直接就能跑
+    #   release_name —— 外层目录与 zip，带版本+平台，便于区分不同版本的下发
+    version_label = _normalize_version(args.version)
+    release_name = args.name or _release_name(args.version)
+    exe_name = args.name or NAME
 
     # PyInstaller 默认把缓存写到 ~/Library/Application Support 或 %APPDATA%。
     # 在受限环境（沙箱、CI 的干净账户）里那可能不可写，所以固定到项目内。
@@ -181,17 +200,18 @@ def main() -> int:
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
         "--onefile" if args.onefile else "--onedir",
-        "--name", name,
+        "--name", exe_name,
         *[f"--exclude-module={m}" for m in EXCLUDES],
         str(ENTRY),
     ]
 
-    print(f"platform : {sys.platform} / {platform.machine()}")
-    print(f"python   : {sys.executable}")
+    print(f"platform   : {sys.platform} / {platform.machine()}")
+    print(f"python     : {sys.executable}")
     src_label = "--version" if args.version else VERSION_FILE.name
-    print(f"version  : {_normalize_version(args.version)}  (from {src_label})")
-    print(f"artifact : {name}")
-    print("command  :", " ".join(cmd))
+    print(f"version    : {version_label}  (from {src_label})")
+    print(f"executable : {exe_name}")
+    print(f"release    : {release_name}")
+    print("command    :", " ".join(cmd))
     print()
 
     result = subprocess.run(cmd, cwd=ROOT)
@@ -201,14 +221,26 @@ def main() -> int:
 
     dist = ROOT / "dist"
 
+    # PyInstaller 按 exe_name 产出 build/<exe_name>/ 与 dist/<exe_name>/。
+    # 把 dist 里的那个目录整名改成 release_name —— 于是解压后是
+    #   endfield-scanner-v0.1.0-macos-arm64/endfield-scanner
+    # 目录带版本（便于区分下发），里面的可执行文件是朴素名（用户路径稳定）。
+    built = dist / exe_name
+    if not args.name and built.exists() and built.name != release_name:
+        # 目录（onedir）与文件（onefile）都走这一条：把名字换成带版本+平台的
+        built.rename(dist / release_name)
+
     # 目录形式额外打一个 zip：分发时给用户那个 zip，解压即用。
     # 用 shutil.make_archive 而不是 zip/Compress-Archive：三大平台行为一致，
     # 且不会像 PowerShell 的 Compress-Archive 那样遇到长路径就出问题。
+    # 单文件模式不打 zip —— 产物本身就是一个文件，再套一层只会让用户多解压一次。
     if not args.onefile and not args.no_zip:
-        target = dist / name
+        target = dist / release_name
         if target.is_dir():
-            print(f"\nzipping {name}.zip ...")
-            archive = shutil.make_archive(str(dist / name), "zip", root_dir=dist, base_dir=name)
+            print(f"\nzipping {release_name}.zip ...")
+            archive = shutil.make_archive(
+                str(dist / release_name), "zip", root_dir=dist, base_dir=release_name
+            )
             print(f"  created: {archive}")
 
     print(f"\nartifacts in {dist}/")

@@ -13,7 +13,14 @@
 
 推荐直接用 [Releases](https://github.com/baislsl/endfield-scanner/releases) 里下载的可执行文件
 （macOS Apple Silicon / Windows 64 位），不需要装 Python。
-**Intel Mac 没有预编译版**，请按下一节从源码运行。
+
+> macOS 用户从 Release 下载后macOS 会拦截未公证软件
+> —— 终端里直接被杀掉，Finder 里则提示"无法验证"并逐个文件要求确认。
+> 需要解压后在目录里手动解除quarantine，执行一次：
+>
+> ```bash
+> xattr -dr com.apple.quarantine endfield-scanner-v<版本>-macos-arm64
+> ```
 
 ### 1. 登录一次，拿到 token
 

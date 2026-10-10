@@ -162,10 +162,63 @@ def _release_name(version: str | None = None) -> str:
     return f"{NAME}-{_normalize_version(version)}-{_platform_tag()}"
 
 
+def _resign_tree_macos(target: Path) -> int:
+    """在 macOS 上把产物里的每个 Mach-O 二进制重新做一遍 ad-hoc 签名。
+
+    为什么必须做（实测踩到的坑）
+    ---------------------------
+    PyInstaller 只对**主可执行文件**做 ad-hoc 签名，从 wheel 里拷进来的
+    ``.so`` / ``.dylib`` / ``Python.framework`` 用的是 wheel 自带的签名。
+    其中 ``Python.framework/Versions/<ver>/Python`` 常常是**无效**的 ——
+    实测报错::
+
+        code has no resources but signature indicates they must be present
+
+    后果不是"跑不起来"，而是 Gatekeeper 逐个弹窗拦截：先弹 Python，再一个个弹
+    ``*.cpython-312-darwin.so``，用户得手动 Unblock 几十次。全树重签后
+    194 个二进制全部 ``codesign -v`` 通过。
+
+    这是个纯本地的 ad-hoc 签名（``--sign -``），**不是**开发者证书签名，
+    因此也不能替代公证（notarize）。它的作用是让每个二进制自身有效，
+    这样 Gatekeeper 的逐文件校验不会失败。
+
+    返回重新签名的文件数。
+    """
+    if sys.platform != "darwin":
+        return 0
+
+    # 先用一次 `file` 把 Mach-O 认出来。逐个调用 `file` 也能行，但 240 个文件
+    # 每次起一个进程太浪费；这里一次批量处理。
+    out = subprocess.run(
+        ["bash", "-c",
+         'find "$1" -type f -size +100k -print0 | '
+         'xargs -0 file | grep "Mach-O" | sed "s/:.*//"',
+         "_", str(target)],
+        capture_output=True, text=True,
+    )
+    binaries = [Path(line) for line in out.stdout.splitlines() if line.strip()]
+
+    signed = 0
+    for path in binaries:
+        r = subprocess.run(
+            ["codesign", "--force", "--sign", "-", str(path)],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            signed += 1
+
+    # 最后给整个目录封一次，让嵌套的 .framework 也有完整的封印
+    subprocess.run(["codesign", "--force", "--sign", "-", str(target)],
+                   capture_output=True, text=True)
+    return signed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a standalone executable for the current platform")
     parser.add_argument("--onefile", action="store_true",
                         help="single-file output (about 5s startup; use only when a single file is required)")
+    parser.add_argument("--no-sign", action="store_true",
+                        help="macOS only: skip re-signing the bundled Mach-O binaries")
     parser.add_argument("--no-zip", action="store_true",
                         help="skip the extra zip (by default onedir output is also zipped)")
     parser.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
@@ -229,6 +282,15 @@ def main() -> int:
     if not args.name and built.exists() and built.name != release_name:
         # 目录（onedir）与文件（onefile）都走这一条：把名字换成带版本+平台的
         built.rename(dist / release_name)
+
+    # macOS：把每个 Mach-O 重新 ad-hoc 签名，否则 Gatekeeper 会逐个弹窗，
+    # 用户要 Unblock 几十次。重签必须在**改名之后**做 —— 签的是最终路径。
+    if sys.platform == "darwin" and not args.no_sign:
+        final = dist / release_name
+        if final.exists():
+            print("\nsigning Mach-O binaries (ad-hoc) ...")
+            n = _resign_tree_macos(final)
+            print(f"  re-signed {n} binaries")
 
     # 目录形式额外打一个 zip：分发时给用户那个 zip，解压即用。
     # 用 shutil.make_archive 而不是 zip/Compress-Archive：三大平台行为一致，
